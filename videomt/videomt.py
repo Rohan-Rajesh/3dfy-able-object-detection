@@ -371,14 +371,10 @@ class videomt(nn.Module):
     def inference_video(self, pred_cls, pred_masks, img_size, output_height, output_width, first_resize_size):
         if len(pred_cls) > 0:
             scores = F.softmax(pred_cls, dim=-1)[:, :-1]
-            labels = torch.arange(
-                self.backbone.num_classes,
-                device=self.device
-            ).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
-            # keep top-10 predictions
-            scores_per_image, topk_indices = scores.flatten(0, 1).topk(10, sorted=False)
-            labels_per_image = labels[topk_indices]
-            topk_indices = topk_indices // self.backbone.num_classes
+            # class-agnostic: rank queries by their best score across all classes
+            scores_per_image, _ = scores.max(dim=-1)
+            scores_per_image, topk_indices = scores_per_image.topk(10, sorted=False)
+            labels_per_image = [0] * len(topk_indices)
             topk_indices = topk_indices.to(pred_masks.device)
             pred_masks = pred_masks[topk_indices]
 
@@ -394,7 +390,7 @@ class videomt(nn.Module):
             masks = pred_masks > 0.
 
             out_scores = scores_per_image.tolist()
-            out_labels = labels_per_image.tolist()
+            out_labels = labels_per_image
             out_masks = [m for m in masks.cpu()]
         else:
             out_scores = []
@@ -1262,13 +1258,10 @@ class videomt_online(videomt):
             if aux_pred_cls is not None:
                 aux_pred_cls = F.softmax(aux_pred_cls, dim=-1)[:, :-1]
                 scores = torch.maximum(scores, aux_pred_cls.to(scores))
-            labels = torch.arange(
-                self.backbone.num_classes, device=self.device
-            ).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
-            # keep top-K predictions
-            scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.max_num, sorted=False)
-            labels_per_image = labels[topk_indices]
-            topk_indices = topk_indices // self.backbone.num_classes
+            # class-agnostic: rank queries by their best score across all classes
+            scores_per_image, _ = scores.max(dim=-1)
+            scores_per_image, topk_indices = scores_per_image.topk(self.max_num, sorted=False)
+            labels_per_image = [0] * len(topk_indices)
             pred_masks = pred_masks[topk_indices]
             pred_ids = pred_id[topk_indices]
 

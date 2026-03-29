@@ -73,12 +73,10 @@ class TrackVisualizer(Visualizer):
                 dataset_classes = stuff_classes
             else:
                 dataset_classes = thing_classes + stuff_classes
-        labels = _create_text_labels(classes, scores, dataset_classes)
-        if labels is not None:
-            if ids is None:
-                labels = ["[{}] ".format(_id) + l for _id, l in enumerate(labels)]
-            else:
-                labels = ["[{}] ".format(self._get_continuous_id(_id)) + l for _id, l in zip(ids, labels)]
+        if ids is None:
+            labels = ["[{}]".format(_id) for _id in range(len(classes))] if classes is not None else None
+        else:
+            labels = ["[{}]".format(self._get_continuous_id(_id)) for _id in ids] if ids is not None else None
 
         if preds.has("pred_masks"):
             masks = np.asarray(preds.pred_masks)
@@ -100,27 +98,21 @@ class TrackVisualizer(Visualizer):
                 dataset_colors = thing_colors + stuff_colors
 
         if ids is None:
-            # using class ID to get color
-            # colors = [
-            #     self._jitter([x / 255 for x in dataset_colors[c]], id) for id, c in enumerate(classes)
-            # ]
-
-            # using object ID to get color
-            colors = [
-                self._jitter([x / 255 for x in dataset_colors[id % len(dataset_colors)]],
-                             id) for id, c in enumerate(classes)
-            ]
+            if dataset_colors is not None:
+                colors = [
+                    self._jitter([x / 255 for x in dataset_colors[id % len(dataset_colors)]],
+                                 id) for id, c in enumerate(classes)
+                ]
+            else:
+                colors = [self._jitter(_ID_JITTERS[id % len(_ID_JITTERS)], id) for id, c in enumerate(classes)]
         else:
-            # using class ID to get color
-            # colors = [
-            #     self._jitter([x / 255 for x in dataset_colors[c]], ids[id]) for id, c in enumerate(classes)
-            # ]
-
-            # using object ID to get color
-            colors = [
-                self._jitter([x / 255 for x in dataset_colors[ids[id] % len(dataset_colors)]],
-                             ids[id]) for id, c in enumerate(classes)
-            ]
+            if dataset_colors is not None:
+                colors = [
+                    self._jitter([x / 255 for x in dataset_colors[ids[id] % len(dataset_colors)]],
+                                 ids[id]) for id, c in enumerate(classes)
+                ]
+            else:
+                colors = [self._jitter(_ID_JITTERS[ids[id] % len(_ID_JITTERS)], ids[id]) for id, c in enumerate(classes)]
         alpha = 0.5
 
         if self._instance_mode == ColorMode.IMAGE_BW:

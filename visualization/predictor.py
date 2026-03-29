@@ -18,7 +18,28 @@ from detectron2.modeling import build_model
 import detectron2.data.transforms as T
 import numpy as np
 
-def _get_objects_from_outputs(outputs):
+def _get_objects_from_outputs(outputs, metadata=None):
+    # Build a set of category_ids to exclude based on class name.
+    # Covers both thing_classes (VIS/VPS) and stuff_classes (VPS).
+    EXCLUDED_CLASS_NAMES = {"person"}
+    excluded_category_ids = set()
+    if metadata is not None:
+        all_classes = []
+        id_offset = 0
+        if hasattr(metadata, 'thing_dataset_id_to_contiguous_id'):
+            # VPS: category_ids are the original dataset ids (identity-mapped in VIPSeg)
+            for cat_id, name in zip(
+                metadata.thing_dataset_id_to_contiguous_id.keys(),
+                getattr(metadata, 'thing_classes', [])
+            ):
+                if name.lower() in EXCLUDED_CLASS_NAMES:
+                    excluded_category_ids.add(cat_id)
+        elif hasattr(metadata, 'thing_classes'):
+            # VIS: category_id is contiguous index into thing_classes
+            for i, name in enumerate(metadata.thing_classes):
+                if name.lower() in EXCLUDED_CLASS_NAMES:
+                    excluded_category_ids.add(i)
+
     def _get_objects_from_vis_outputs(outputs):
         pred_scores = outputs["pred_scores"]
         pred_labels = outputs["pred_labels"]
@@ -29,7 +50,7 @@ def _get_objects_from_outputs(outputs):
             pred_ids_ = None
             pred_ids = None
 
-        # filter low score instance prediction
+        # filter low score instance prediction and excluded classes
         pred_scores_ = []
         pred_labels_ = []
         pred_masks_ = []
@@ -37,6 +58,8 @@ def _get_objects_from_outputs(outputs):
             pred_ids_ = []
         for i, score in enumerate(pred_scores):
             if score < 0.3:
+                continue
+            if pred_labels[i] in excluded_category_ids:
                 continue
             pred_scores_.append(pred_scores[i])
             pred_labels_.append(pred_labels[i])
@@ -66,19 +89,25 @@ def _get_objects_from_outputs(outputs):
         segments_infos = outputs['segments_infos']
         pred_ids = outputs['pred_ids']
 
-        # generate object score list
-        pred_scores = [1 for segments_info in segments_infos]
+        # keep only foreground thing instances, excluding specified classes (e.g. person)
+        thing_infos = [
+            (i, s) for i, s in enumerate(segments_infos)
+            if s.get('isthing', True) and s['category_id'] not in excluded_category_ids
+        ]
+
+        pred_scores = [1 for _ in thing_infos]
         outputs["pred_scores"] = pred_scores
 
-        # get bit-mask and category lable for per object(thing & stuff)
         pred_labels = []
         pred_masks = []
+        filtered_ids = []
         pan_seg = outputs['pred_masks']
-        for segments_info in segments_infos:
+        for orig_idx, segments_info in thing_infos:
             id = segments_info['id']
             pred_masks.append(pan_seg == id)
             pred_labels.append(segments_info['category_id'])
-        return pred_masks, pred_labels, pred_scores, pred_ids
+            filtered_ids.append(pred_ids[orig_idx])
+        return pred_masks, pred_labels, pred_scores, filtered_ids
 
     func_dict = {
         'vis': _get_objects_from_vis_outputs,
@@ -130,7 +159,7 @@ class VisualizationDemo(object):
         predictions = self.predictor(frames)
 
         image_size = predictions["image_size"]
-        pred_masks, pred_labels, pred_scores, pred_ids = _get_objects_from_outputs(predictions)
+        pred_masks, pred_labels, pred_scores, pred_ids = _get_objects_from_outputs(predictions, self.metadata)
 
         frame_masks = list(zip(*pred_masks))
         total_vis_output = []
@@ -160,7 +189,7 @@ class VisualizationDemo_windows(VisualizationDemo):
         """
         predictions = self.predictor((frames, keep))
 
-        pred_masks, pred_labels, pred_scores, pred_ids = _get_objects_from_outputs(predictions)
+        pred_masks, pred_labels, pred_scores, pred_ids = _get_objects_from_outputs(predictions, self.metadata)
         image_size = predictions["image_size"]
 
         frame_masks = list(zip(*pred_masks))
