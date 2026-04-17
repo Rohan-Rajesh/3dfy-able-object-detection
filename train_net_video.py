@@ -16,6 +16,9 @@ try:
 except:
     pass
 
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*torch.cuda.amp.autocast.*')
+
 import logging
 import os
 from collections import OrderedDict
@@ -79,17 +82,19 @@ class AttentionMaskAnnealingHook(HookBase):
     def after_step(self):
         model = self.trainer.model
         device = model.device
-        dtype = model.module.backbone.attn_mask_probs[0].dtype
-        if model.module.backbone.attn_mask_annealing_enabled:
-            for i in range(model.module.backbone.num_blocks):
-                model.module.backbone.attn_mask_probs[i] = self.mask_annealing(
-                    model.module.backbone.start_steps[i],
+        # unwrap DDP (multi-GPU) or use model directly (single GPU)
+        backbone_model = model.module if hasattr(model, 'module') else model
+        dtype = backbone_model.backbone.attn_mask_probs[0].dtype
+        if getattr(backbone_model.backbone, 'attn_mask_annealing_enabled', False):
+            for i in range(backbone_model.backbone.num_blocks):
+                backbone_model.backbone.attn_mask_probs[i] = self.mask_annealing(
+                    backbone_model.backbone.start_steps[i],
                     self.trainer.iter,
-                    model.module.backbone.end_steps[i],
+                    backbone_model.backbone.end_steps[i],
                     dtype,
                     device,
                 )
-            for i, prob in enumerate(model.module.backbone.attn_mask_probs):
+            for i, prob in enumerate(backbone_model.backbone.attn_mask_probs):
                 self.trainer.storage.put_scalar(f"attn_mask_prob_{i}", prob.item())
         
 

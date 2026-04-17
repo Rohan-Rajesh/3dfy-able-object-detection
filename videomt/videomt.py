@@ -1259,9 +1259,9 @@ class videomt_online(videomt):
                 aux_pred_cls = F.softmax(aux_pred_cls, dim=-1)[:, :-1]
                 scores = torch.maximum(scores, aux_pred_cls.to(scores))
             # class-agnostic: rank queries by their best score across all classes
-            scores_per_image, _ = scores.max(dim=-1)
+            scores_per_image, label_indices = scores.max(dim=-1)
             scores_per_image, topk_indices = scores_per_image.topk(self.max_num, sorted=False)
-            labels_per_image = [0] * len(topk_indices)
+            labels_per_image = label_indices[topk_indices]
             pred_masks = pred_masks[topk_indices]
             pred_ids = pred_id[topk_indices]
 

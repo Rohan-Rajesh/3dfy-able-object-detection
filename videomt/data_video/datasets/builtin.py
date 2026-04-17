@@ -18,6 +18,7 @@ from .ytvis import (
     _get_ytvis_2019_instances_meta,
     _get_ytvis_2021_instances_meta,
     _get_ovis_instances_meta,
+    _get_custom_instances_meta,
 )
 
 # ============================================================================
@@ -212,6 +213,35 @@ def register_all_sot(root):
         )
 
 
+# ============================================================================
+# Custom AI2Thor Indoor Dataset
+# Paths are absolute so they are independent of DETECTRON2_DATASETS.
+# ============================================================================
+_CUSTOM_DATA_ROOT = "/mmfs1/gscratch/krishna/rohanr12/videomt/intermediate_data"
+
+_PREDEFINED_SPLITS_CUSTOM = {
+    "custom_train": (
+        f"{_CUSTOM_DATA_ROOT}/step1_frames",
+        f"{_CUSTOM_DATA_ROOT}/annotations/train.json",
+    ),
+    "custom_val": (
+        f"{_CUSTOM_DATA_ROOT}/step1_frames",
+        f"{_CUSTOM_DATA_ROOT}/annotations/valid.json",
+    ),
+}
+
+
+def register_all_custom(_root=None):
+    """Register custom AI2Thor indoor dataset."""
+    for key, (image_root, json_file) in _PREDEFINED_SPLITS_CUSTOM.items():
+        register_ytvis_instances(
+            key,
+            _get_custom_instances_meta(),
+            json_file,
+            image_root,
+        )
+
+
 if __name__.endswith(".builtin"):
     # Register datasets
     _root = os.getenv("DETECTRON2_DATASETS", "datasets")
@@ -224,3 +254,4 @@ if __name__.endswith(".builtin"):
     from . import vps
     from . import vss
     register_all_sot(_root)
+    register_all_custom()

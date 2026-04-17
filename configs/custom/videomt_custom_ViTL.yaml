@@ -1,0 +1,32 @@
+_BASE_: ../ytvis19/videomt/vit-large/videomt_online_ViTL.yaml
+
+MODEL:
+  BACKBONE:
+    NUM_CLASSES: 1
+
+DATASETS:
+  DATASET_NEED_MAP: [False]
+  DATASET_TYPE: ['video_instance']
+  DATASET_TYPE_TEST: ['video_instance']
+  DATASET_RATIO: [1.0]
+  TRAIN: ("custom_train",)
+  TEST: ("custom_val",)
+
+# The model requires exactly 1 clip per GPU (IMS_PER_BATCH == num_GPUs).
+# Going above 1 clip/GPU breaks the query broadcast in the backbone.
+#
+# Option A: single GPU (44 GB)
+#   python train_net_video.py --num-gpus 1 --config-file ...
+SOLVER:
+  IMS_PER_BATCH: 1     # 1 clip per step = 1 clip/GPU
+  BASE_LR: 0.0000125   # scaled with batch size (0.0001 * 1/8)
+  MAX_ITER: 30000
+  CHECKPOINT_PERIOD: 1000  # eval every 1k iters to track convergence
+INPUT:
+  SAMPLING_FRAME_NUM: 3  # 3 frames per clip (reduced from 5 for memory)
+#
+# Option B: 4 GPUs on Hyak — comment out SOLVER/INPUT above and run:
+#   srun --gpus-per-node=4 python train_net_video.py --num-gpus 4 --config-file ...
+#   IMS_PER_BATCH=4, SAMPLING_FRAME_NUM=5 → 1 clip/GPU, fits in 44 GB each
+
+OUTPUT_DIR: './output_videomt_custom_ViTL'
