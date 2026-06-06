@@ -204,13 +204,17 @@ class VidEoMT_CLASS(nn.Module):
 
         x_outputs = torch.stack(x_outputs, dim=0)  # (t, b, N, c) to (t*b, N, c)
         x_outputs = x_outputs.reshape(t * bs, x_outputs.shape[2], x_outputs.shape[3])
-        mask_logits, class_logits = self._predict(self.encoder.backbone.norm(x_outputs), H_g, W_g)
+        x_norm = self.encoder.backbone.norm(x_outputs)
+        mask_logits, class_logits = self._predict(x_norm, H_g, W_g)
         mask_logits = einops.rearrange(mask_logits, '(b t) q h w -> b q t h w', t=t)
         class_logits = einops.rearrange(class_logits, '(b t) q c -> b t q c', t=t)
+        
+        pred_embds = einops.rearrange(x_norm[:, :self.num_q, :], '(b t) q c -> b c t q', t=t)
 
         out = {
             'pred_logits': class_logits,
             'pred_masks': mask_logits,
+            'pred_embds': pred_embds,
             'aux_outputs': self._set_aux_loss(
                 class_logits_per_frame_list if self.mask_classification else None,
                 mask_logits_per_frame_list,
@@ -273,5 +277,3 @@ class VidEoMT(VidEoMT_CLASS, Backbone):
             num_frames= self.num_frames,
             
         )
-
-       

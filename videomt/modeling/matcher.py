@@ -106,15 +106,16 @@ class VideoHungarianMatcher(nn.Module):
             out_prob = outputs["pred_logits"][b].softmax(-1)  # [num_queries, num_classes]
             tgt_ids = targets[b]["labels"].to(torch.int64)
 
-
-            # Compute the classification cost. Contrary to the loss, we don't use the NLL,
-            # but approximate it in 1 - proba[target class].
-            # The 1 is a constant that doesn't change the matching, it can be ommitted.
-            try:
-                cost_class = -out_prob[:, tgt_ids]
-            except:
-                cost_class = 0.0
-                print(tgt_ids)
+            # Safe classification cost to prevent out-of-bounds CUDA assert
+            valid_mask = (tgt_ids >= 0) & (tgt_ids < out_prob.shape[-1])
+            safe_tgt_ids = tgt_ids.clone()
+            safe_tgt_ids[~valid_mask] = 0  # temporarily map invalid to 0
+            
+            cost_class = -out_prob[:, safe_tgt_ids]
+            # for invalid targets, the cost is set to 0.0, matching previous exception fallback
+            if (~valid_mask).any():
+                cost_class[:, ~valid_mask] = 0.0
+                print("Invalid tgt_ids detected:", tgt_ids[~valid_mask])
 
             out_mask = outputs["pred_masks"][b]  # [num_queries, T, H_pred, W_pred]
             # gt masks are already padded when preparing target
@@ -245,12 +246,19 @@ class VideoHungarianMatcher_Consistent(VideoHungarianMatcher):
                 overall_bs = b * self.frames + f
                 used_tgt = apper_frame_id[f]
                 out_prob = outputs["pred_logits"][overall_bs].softmax(-1)  # [num_queries, num_classes]
-                tgt_ids = targets[overall_bs]["labels"][used_tgt]
+                tgt_ids = targets[overall_bs]["labels"][used_tgt].to(torch.int64)
+
+                # Safe classification cost to prevent out-of-bounds CUDA assert
+                valid_mask = (tgt_ids >= 0) & (tgt_ids < out_prob.shape[-1])
+                safe_tgt_ids = tgt_ids.clone()
+                safe_tgt_ids[~valid_mask] = 0  # temporarily map invalid to 0
 
                 # Compute the classification cost. Contrary to the loss, we don't use the NLL,
                 # but approximate it in 1 - proba[target class].
-                # The 1 is a constant that doesn't change the matching, it can be ommitted.
-                cost_class = -out_prob[:, tgt_ids]
+                cost_class = -out_prob[:, safe_tgt_ids]
+                # for invalid targets, the cost is set to 0.0
+                if (~valid_mask).any():
+                    cost_class[:, ~valid_mask] = 0.0
 
                 out_mask = outputs["pred_masks"][overall_bs]  # [num_queries, T, H_pred, W_pred]
                 # gt masks are already padded when preparing target

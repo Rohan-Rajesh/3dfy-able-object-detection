@@ -284,13 +284,14 @@ def setup(args):
 
     if comm.get_rank() == 0:
         wandb.init(
+            mode="offline",
             id=cfg.OUTPUT_DIR.rsplit("/", 1)[-1],
             project="videomt",
             config=cfg,
             sync_tensorboard=True,
             resume="allow",
             dir=cfg.OUTPUT_DIR,
-            settings=wandb.Settings(start_method="fork"),
+            settings=wandb.Settings(start_method="fork", init_timeout=180),
         )
 
         wandb.define_metric("trainer/global_step")

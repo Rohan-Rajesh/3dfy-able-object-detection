@@ -133,6 +133,16 @@ class videomt(nn.Module):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
 
+        weight_dict.update(
+            {
+                "loss_ctx": 2.0,
+                "loss_ctx_aux": 2.0,
+                "loss_proto": 2.0,
+                "loss_proto_aux": 2.0,
+                "loss_mvc": 2.0,
+            }
+        )
+
         losses = ["labels", "masks"]
 
         criterion = VideoSetCriterion(
@@ -371,10 +381,14 @@ class videomt(nn.Module):
     def inference_video(self, pred_cls, pred_masks, img_size, output_height, output_width, first_resize_size):
         if len(pred_cls) > 0:
             scores = F.softmax(pred_cls, dim=-1)[:, :-1]
-            # class-agnostic: rank queries by their best score across all classes
-            scores_per_image, _ = scores.max(dim=-1)
-            scores_per_image, topk_indices = scores_per_image.topk(10, sorted=False)
-            labels_per_image = [0] * len(topk_indices)
+            labels = torch.arange(
+                self.backbone.num_classes,
+                device=self.device
+            ).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
+            # keep top-10 predictions
+            scores_per_image, topk_indices = scores.flatten(0, 1).topk(10, sorted=False)
+            labels_per_image = labels[topk_indices]
+            topk_indices = topk_indices // self.backbone.num_classes
             topk_indices = topk_indices.to(pred_masks.device)
             pred_masks = pred_masks[topk_indices]
 
@@ -390,7 +404,7 @@ class videomt(nn.Module):
             masks = pred_masks > 0.
 
             out_scores = scores_per_image.tolist()
-            out_labels = labels_per_image
+            out_labels = labels_per_image.tolist()
             out_masks = [m for m in masks.cpu()]
         else:
             out_scores = []
@@ -505,6 +519,9 @@ class videomt_segmenter(videomt):
         class_weight = cfg.MODEL.BACKBONE.CLASS_WEIGHT
         dice_weight = cfg.MODEL.BACKBONE.DICE_WEIGHT
         mask_weight = cfg.MODEL.BACKBONE.MASK_WEIGHT
+        ctx_weight = cfg.MODEL.BACKBONE.CTX_WEIGHT
+        proto_weight = cfg.MODEL.BACKBONE.PROTO_WEIGHT
+        mvc_weight = cfg.MODEL.BACKBONE.MVC_WEIGHT
 
         # building criterion
         matcher = VideoHungarianMatcher(
@@ -513,7 +530,7 @@ class videomt_segmenter(videomt):
             cost_dice=dice_weight,
             num_points=cfg.MODEL.BACKBONE.TRAIN_NUM_POINTS,
         )
-        
+
         weight_dict = {
             "loss_ce": class_weight,
             "loss_mask": mask_weight,
@@ -529,10 +546,11 @@ class videomt_segmenter(videomt):
 
         weight_dict.update(
             {
-                "loss_ctx": 2.0,
-                "loss_ctx_aux": 2.0,
-                "loss_proto": 2.0,
-                "loss_proto_aux": 2.0,
+                "loss_ctx": ctx_weight,
+                "loss_ctx_aux": ctx_weight,
+                "loss_proto": proto_weight,
+                "loss_proto_aux": proto_weight,
+                "loss_mvc": mvc_weight,
             }
         )
 
@@ -1018,6 +1036,9 @@ class videomt_online(videomt):
         class_weight = cfg.MODEL.BACKBONE.CLASS_WEIGHT
         dice_weight = cfg.MODEL.BACKBONE.DICE_WEIGHT
         mask_weight = cfg.MODEL.BACKBONE.MASK_WEIGHT
+        ctx_weight = cfg.MODEL.BACKBONE.CTX_WEIGHT
+        proto_weight = cfg.MODEL.BACKBONE.PROTO_WEIGHT
+        mvc_weight = cfg.MODEL.BACKBONE.MVC_WEIGHT
 
         # building criterion
         matcher = VideoHungarianMatcher_Consistent(
@@ -1045,8 +1066,11 @@ class videomt_online(videomt):
 
         weight_dict.update(
             {
-                "loss_reid": 2.0,
-                "loss_reid_aux": 2.0,
+                "loss_reid": ctx_weight,
+                "loss_reid_aux": ctx_weight,
+                "loss_ctx": ctx_weight,
+                "loss_ctx_aux": ctx_weight,
+                "loss_mvc": mvc_weight,
             }
         )
 
@@ -1258,10 +1282,13 @@ class videomt_online(videomt):
             if aux_pred_cls is not None:
                 aux_pred_cls = F.softmax(aux_pred_cls, dim=-1)[:, :-1]
                 scores = torch.maximum(scores, aux_pred_cls.to(scores))
-            # class-agnostic: rank queries by their best score across all classes
-            scores_per_image, label_indices = scores.max(dim=-1)
-            scores_per_image, topk_indices = scores_per_image.topk(self.max_num, sorted=False)
-            labels_per_image = label_indices[topk_indices]
+            labels = torch.arange(
+                self.backbone.num_classes, device=self.device
+            ).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
+            # keep top-K predictions
+            scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.max_num, sorted=False)
+            labels_per_image = labels[topk_indices]
+            topk_indices = topk_indices // self.backbone.num_classes
             pred_masks = pred_masks[topk_indices]
             pred_ids = pred_id[topk_indices]
 
@@ -1495,4 +1522,3 @@ class videomt_online(videomt):
 
         losses = loss_reid(contrastive_items, outputs['pred_references'], 'loss_reid')
         return losses
-

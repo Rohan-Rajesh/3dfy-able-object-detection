@@ -1,124 +1,49 @@
-# Prepare Datasets 
+# SyDog-Video: A Synthetic Dog Video Dataset for Temporal Pose Estimation 
 
-A dataset can be used by accessing [DatasetCatalog](https://detectron2.readthedocs.io/modules/data.html#detectron2.data.DatasetCatalog)
-for its data, or [MetadataCatalog](https://detectron2.readthedocs.io/modules/data.html#detectron2.data.MetadataCatalog) for its metadata (class names, etc).
-This document explains how to setup the builtin datasets so they can be used by the above APIs.
-[Use Custom Datasets](https://detectron2.readthedocs.io/tutorials/datasets.html) gives a deeper dive on how to use `DatasetCatalog` and `MetadataCatalog`,
-and how to add new datasets to them.
+## Description
+Each verion of the dataset includes 500 synthetic dog videos of 175 frames (87,500 frames) including 2D ground truth such as bounding box coordinates, 33 keypoint labels and segmentation maps. There are 6 versions of the datasets: clean_plate, w_assets, w_assetsPlusPeople, w_people, wo_fur_clean_plate, wo_groundplane. For example, the clean_plate-version of the dataset includes images with HDRI and a ground geometry which represents the floor. There are'nt any distractors such as 3D assets or people in the background present.
 
-VidEoMT has builtin support for a few datasets.
-The datasets are assumed to exist in a directory specified by the environment variable
-`DETECTRON2_DATASETS`.
-Under this directory, detectron2 will look for datasets in the structure described below, if needed.
-```
-$DETECTRON2_DATASETS/
-  ytvis_2019/
-  ytvis_2021/
-  ovis/
-  VIPSeg/
-  VSPW_480p/
-```
+## Folder structure
+- [clean_plate, ..., wo_groundplane]/
+These folders contain the data of the videos e.g. RGB data and labels. The subfolders refer to sequences associated to the type of dog e.g. dog2, labrador, etc. Because the dataset was generated using the Unity Perception package the subfolder (e.g. dog2) contains the following structure including the keypoint labels (Dataset[ID]), RGB data (RGB[ID]) and semantic segmenation information (SemanticSegmentation[ID]). These labels were processings using code from the following link and transformed into JSON annotation files. For the JSON annotation files please refer to the vid_annotations folder.
 
-You can set the location for builtin datasets by `export DETECTRON2_DATASETS=/path/to/datasets`.
-If left unset, the default is `./datasets` relative to your current working directory.
+- dog2/
+    - Dataset[ID]
+    - Logs
+    - RGB[ID]
+    - SemanticSegmentation[ID]
+- labrador/
+    - ...
+- pug/
+    - ...
+- pitbull/
+    - ...
+- wolf/
+    - ...
+- vid_annotations/
+    The folder contains the annotations for each video sequence e.g. video-000-clean_plate-dog2.json
+    The data format of the JSON files are the following: video-[videoID]-[dataset_type]-[dog_type].json
+- split_annotations/within_dataset/
+    The dataset training/test split files e.g. {[dataset_type]}.json files, which represent the sequences used.
+- scripts
+	This folder contains a script how to access the data for training or just the individual video sequences.
+
+## Citation
+@article{Shooter_SyDogVideo2023,
+	abstract = {We aim to estimate the pose of dogs from videos using a temporal deep learning model as this can result in more accurate pose predictions when temporary occlusions or substantial movements occur. Generally, deep learning models require a lot of data to perform well. To our knowledge, public pose datasets containing videos of dogs are non existent. To solve this problem, and avoid manually labelling videos as it can take a lot of time, we generated a synthetic dataset containing 500 videos of dogs performing different actions using Unity3D. Diversity is achieved by randomising parameters such as lighting, backgrounds, camera parameters and the dog's appearance and pose. We evaluate the quality of our synthetic dataset by assessing the model's capacity to generalise to real data. Usually, networks trained on synthetic data perform poorly when evaluated on real data, this is due to the domain gap. As there was still a domain gap after improving the quality of the synthetic dataset and inserting diversity, we bridged the domain gap by applying 2 different methods: fine-tuning and using a mixed dataset to train the network. Additionally, we compare the model pre-trained on synthetic data with models pre-trained on a real-world animal pose datasets. We demonstrate that using the synthetic dataset is beneficial for training models with (small) real-world datasets. Furthermore, we show that pre-training the model with the synthetic dataset is the go to choice rather than pre-training on real-world datasets for solving the pose estimation task from videos of dogs.},
+	author = {Shooter, Moira and Malleson, Charles and Hilton, Adrian},
+	date = {2023/12/29},
+	date-added = {2024-05-23 14:51:34 +0100},
+	date-modified = {2024-05-23 14:51:34 +0100},
+	doi = {10.1007/s11263-023-01946-z},
+	id = {Shooter2023},
+	isbn = {1573-1405},
+	journal = {International Journal of Computer Vision},
+	title = {SyDog-Video: A Synthetic Dog Video Dataset for Temporal Pose Estimation},
+	url = {https://doi.org/10.1007/s11263-023-01946-z},
+	year = {2023},
+	bdsk-url-1 = {https://doi.org/10.1007/s11263-023-01946-z}}
 
 
-
-## Expected dataset structure for [YouTube-VIS 2019](https://competitions.codalab.org/competitions/20128):
-
-```
-ytvis_2019/
-  {train,valid,test}.json
-  {train,valid,test}/
-    Annotations/
-    JPEGImages/
-```
-
-## Expected dataset structure for [YouTube-VIS 2021](https://competitions.codalab.org/competitions/28988):
-
-```
-ytvis_2021/
-  {train,valid,test}.json
-  {train,valid,test}/
-    JPEGImages/
-    instances.json
-    
-```
-
-## Expected dataset structure for [YouTube-VIS 2022](https://codalab.lisn.upsaclay.fr/competitions/3410#participate-get_data):
-
-```
-ytvis_2022/
-  {train,valid,test}.json
-  gt_{short,long}.json
-  {train,valid,test}/
-    JPEGImages/
-    instances.json
-  
-```
-
-## Expected dataset structure for [OVIS](http://songbai.site/ovis/):
-
-```
-ovis/
-  annotations/
-    annotations_{train,valid,test}.json
-  {train,valid,test}/
-```
-
-## Expected dataset structure for [VIPSeg](https://github.com/VIPSeg-Dataset/VIPSeg-Dataset):
-
-After downloading the VIPSeg dataset, it still needs to be processed according to the official script (`/datasets/utils/vipseg_change2_720p.py`). To save time, you can directly download the processed VIPSeg dataset from [baiduyun](https://pan.baidu.com/s/1SMausnr6pVDJXTGISeFMuw) (password is `dvis`). 
-```
-VIPSeg/
-  VIPSeg_720P/
-    images/
-    panomasksRGB/
-    panoptic_gt_VIPSeg_{train,val,test}.json
-```
-
-## Expected dataset structure for [VSPW](https://github.com/VSPW-dataset/VSPW-dataset-download):
-```
-VSPW_480p/
-  data/
-    video_1/
-      mask/
-      origin/   
-  train.txt
-  val.txt
-  test.txt
-  data.txt
-  abel_num_dic_final.json
-  
-
-```
-
-## Register your own dataset:
-
-- If it is a VIS/VPS/VSS dataset, convert it to YTVIS/VIPSeg/VSPW format. If it is a image instance dataset, convert it to COCO format.
-- Register it in `/videomt/data_video/datasets/{builtin,vps,vss}.py`
-
-## Convert COCO to YTVIS / OVIS format
-
-VidEoMT provides a helper script (copied from DVIS++) to convert COCO annotations into subsets compatible with **YTVIS 2019**, **YTVIS 2021**, and **OVIS**, by filtering COCO categories.
-
-The script expects the COCO annotation file to be located at:
-
-```bash
-$DETECTRON2_DATASETS/coco/annotations/instances_train2017.json
-```
-
-It generates the following files under:
-
-```bash
-$DETECTRON2_DATASETS/coco/annotations/
-
-coco2ytvis2019_train.json
-coco2ytvis2021_train.json
-coco2ovis_train.json
-```
-
-To run the conversion script:
-```bash
-python tools/convert_coco_to_vis.py
-```
+## License
+SyDog-Video Open Access This article is licensed under a Creative Commons Attribution 4.0 International License, which permits use, sharing, adaptation, distribution and reproduction in any medium or format, as long as you give appropriate credit to the original author(s) and the source, provide a link to the Creative Commons licence, and indicate if changes were made. The images or other third party material in this article are included in the article’s Creative Commons licence, unless indicated otherwise in a credit line to the material. If material is not included in the article’s Creative Commons licence and your intended use is not permitted by statutory regulation or exceeds the permitted use, you will need to obtain permission directly from the copyright holder. To view a copy of this licence, visit http://creativecommons.org/licenses/by/4.0/.

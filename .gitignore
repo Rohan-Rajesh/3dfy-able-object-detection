@@ -13,6 +13,6 @@ jobs/*
 wandb/*
 
 # added
-output_videomt_custom_ViTL/
+output_videomt_custom_ViTL*/
 output_viz/
 intermediate_data/

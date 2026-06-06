@@ -43,6 +43,9 @@ def add_videomt_config(cfg):
     cfg.MODEL.BACKBONE.CLASS_WEIGHT = 1.0
     cfg.MODEL.BACKBONE.DICE_WEIGHT = 1.0
     cfg.MODEL.BACKBONE.MASK_WEIGHT = 20.0
+    cfg.MODEL.BACKBONE.CTX_WEIGHT = 2.0
+    cfg.MODEL.BACKBONE.PROTO_WEIGHT = 2.0
+    cfg.MODEL.BACKBONE.MVC_WEIGHT = 2.0
     cfg.MODEL.BACKBONE.NAME = "VidEoMT"
 
     # transformer config
@@ -151,4 +154,3 @@ def add_videomt_config(cfg):
     cfg.SOLVER.LLRD = 0.8
     cfg.SOLVER.POLY_POWER = 0.9
     cfg.SOLVER.WARMUP_STEPS =[500,1000]
-  

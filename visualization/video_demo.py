@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
 	cfg = setup_cfg(args)
 
-	demo = VisualizationDemo_windows(cfg)
+	demo = VisualizationDemo_windows(cfg, confidence_threshold=args.confidence_threshold)
 
 	assert args.input and args.output
 
@@ -138,4 +138,3 @@ if __name__ == "__main__":
 			len(set(instances)), time.time() - start_time
 		)
 	)
-

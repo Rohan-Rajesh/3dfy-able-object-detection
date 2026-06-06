@@ -5,9 +5,9 @@ Videos are shuffled with a fixed random seed and split by ratio (default 80/20).
 Annotations follow their video into the correct split.  Categories are copied
 unchanged into both files.
 
-Reads:  intermediate_data/annotations/all_annotations.json
-Writes: intermediate_data/annotations/train.json
-        intermediate_data/annotations/valid.json
+Reads:  <output_dir>/all_annotations.json
+Writes: <output_dir>/train.json
+        <output_dir>/valid.json
 """
 
 import json
@@ -61,15 +61,14 @@ def split_dataset(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train/valid split for YTVIS annotations")
-    parser.add_argument("--input", default="../intermediate_data/annotations/all_annotations.json")
-    parser.add_argument("--output-dir", default="../intermediate_data/annotations")
+    parser.add_argument("input", help="Path to all_annotations.json")
+    parser.add_argument("output_dir", help="Folder to write train.json and valid.json into")
     parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
     split_dataset(Path(args.input), output_dir, args.train_ratio, args.seed)
 
 

@@ -174,9 +174,11 @@ class VideoSetCriterion(nn.Module):
             queries_per_id[gt_ids[i].item()].append(q)
         
         for instance_i in queries_per_id.keys():
+            if instance_i == -1:
+                continue
             pos_embed = torch.stack(queries_per_id[instance_i], dim=0)
             anchor = pos_embed.clone()
-            neg_embeds = [torch.stack(queries_per_id[i], dim=0) for i in queries_per_id.keys() if i != instance_i]
+            neg_embeds = [torch.stack(queries_per_id[i], dim=0) for i in queries_per_id.keys() if i != instance_i and i != -1]
             
             if len(neg_embeds) == 0:
                 continue
@@ -210,6 +212,15 @@ class VideoSetCriterion(nn.Module):
 
         idx = self._get_src_permutation_idx(indices)
         target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        
+        # Valid classes must be within [0, num_classes-1]. invalid ones get mapped to the empty class (num_classes).
+        valid_mask = (target_classes_o >= 0) & (target_classes_o < self.num_classes)
+        target_classes_o = torch.where(
+            valid_mask,
+            target_classes_o,
+            torch.tensor(self.num_classes, dtype=target_classes_o.dtype, device=target_classes_o.device)
+        )
+
         target_classes = torch.full(
             src_logits.shape[:2], self.num_classes, dtype=torch.int64, device=src_logits.device
         )
@@ -287,6 +298,154 @@ class VideoSetCriterion(nn.Module):
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
         return loss_map[loss](outputs, targets, indices, num_masks)
 
+    # Custom Multi View consistency loss
+    # takes in a frame, loops through all other frames and averages IoU
+    # for all common objects in the 2 frames to find how diverse they are
+    def find_most_diverse_frame(self, frame_t_idx, all_targets):
+        masks_t = all_targets[frame_t_idx]["masks"]   # [N_t, H, W]
+        ids_t = all_targets[frame_t_idx]["ids"]        # [N_t]
+        
+        best_frame = None
+        best_diversity = -1
+        
+        for t_prime_idx, targets_t_prime in enumerate(all_targets):
+            if t_prime_idx == frame_t_idx:
+                continue
+            
+            masks_t_prime = targets_t_prime["masks"]   # [N_t', H, W]
+            ids_t_prime = targets_t_prime["ids"]        # [N_t']
+            
+            # Flatten to 1D for set operations
+            ids_t_flat = ids_t.flatten()
+            ids_t_prime_flat = ids_t_prime.flatten()
+            
+            # Find common objects
+            common_ids = set(ids_t_flat.tolist()) & set(ids_t_prime_flat.tolist())
+            if not common_ids:
+                continue
+            
+            # Average IoU across common objects
+            ious = []
+            for obj_id in common_ids:
+                idx_t = (ids_t_flat == obj_id).nonzero(as_tuple=True)[0][0]
+                idx_t_prime = (ids_t_prime_flat == obj_id).nonzero(as_tuple=True)[0][0]
+                
+                m_t = masks_t[idx_t].float()
+                m_t_prime = masks_t_prime[idx_t_prime].float()
+                
+                intersection = (m_t * m_t_prime).sum()
+                union = (m_t + m_t_prime - m_t * m_t_prime).sum()
+                iou = intersection / (union + 1e-6)
+                ious.append(iou)
+            
+            # Frame-level diversity = 1 - mean IoU across objects
+            frame_diversity = 1 - (sum(ious) / len(ious))
+            
+            if frame_diversity > best_diversity:
+                best_diversity = frame_diversity
+                best_frame = t_prime_idx
+        
+        return best_frame
+
+    def get_aligned_predictions(self, outputs, targets, indices, batch_idx):
+        """
+        Aligns predicted masks and queries to ground truth order
+        using Hungarian matching indices.
+
+        Returns per-object aligned tensors.
+        """
+        src_i, tgt_i = indices[batch_idx]
+
+        # Aligned predicted masks: [total_matched, H, W]
+        pred_masks_aligned = outputs["pred_masks"][batch_idx, src_i]
+
+        # Aligned predicted reid embeddings: [total_matched, D]
+        # (Handling multi-dimensional queries correctly for the batch element)
+        queries = outputs["pred_embds"]
+        if queries.dim() == 4:
+             # shape is [B, C, T, Q], convert to [B*T, Q, C]
+             queries = queries.permute(0, 2, 3, 1).flatten(0, 1)
+
+        pred_reid_aligned = queries[batch_idx, src_i]
+
+        # Aligned ground truth masks: [total_matched, H, W]
+        gt_masks_aligned = targets[batch_idx]["masks"][tgt_i]
+
+        # Aligned instance IDs: [total_matched]
+        gt_ids_aligned = targets[batch_idx]["ids"][tgt_i]
+
+        # Confidence: max foreground class probability for each matched query
+        logits = outputs["pred_logits"][batch_idx, src_i]  # [N_matched, num_classes+1]
+        conf = F.softmax(logits, dim=-1)[:, :-1].max(dim=-1).values  # [N_matched]
+
+        return pred_masks_aligned, pred_reid_aligned, gt_masks_aligned, gt_ids_aligned, conf
+
+    def loss_multiview_consistency(self, outputs, targets, indices):
+        L_mvc = 0.0
+        n_pairs = 0
+        seen_pairs = set()
+        
+        # Precompute the most diverse frame for each frame
+        diverse_pairs = {t: self.find_most_diverse_frame(t, targets) for t in range(len(targets))}
+        
+        for frame_t, frame_t_prime in diverse_pairs.items():
+            
+            if frame_t_prime is None:
+                continue
+            
+            # Avoid duplicate pairs
+            pair = (min(frame_t, frame_t_prime),
+                    max(frame_t, frame_t_prime))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            
+            # Get aligned predictions for both frames
+            pred_masks_t, pred_reids_t, gt_masks_t, gt_ids_t, conf_t = \
+                self.get_aligned_predictions(
+                    outputs,
+                    targets,
+                    indices,
+                    frame_t
+                )
+
+            pred_masks_tp, pred_reids_tp, gt_masks_tp, gt_ids_tp, conf_tp = \
+                self.get_aligned_predictions(
+                    outputs,
+                    targets,
+                    indices,
+                    frame_t_prime
+                )
+            
+            # Match objects across frames using instance IDs
+            ids_t = gt_ids_t.flatten().tolist()
+            ids_tp = gt_ids_tp.flatten().tolist()
+            common_ids = set(ids_t) & set(ids_tp)
+            
+            if not common_ids:
+                continue
+            
+            for obj_id in common_ids:
+                idx_t  = ids_t.index(obj_id)
+                idx_tp = ids_tp.index(obj_id)
+                
+                reid_t  = pred_reids_t[idx_t]       # [D]
+                reid_tp = pred_reids_tp[idx_tp]      # [D]
+
+                weight = (conf_t[idx_t] * conf_tp[idx_tp]).detach()
+
+                # Query consistency loss
+                L_query = weight * F.mse_loss(reid_t, reid_tp)
+
+                L_mvc += L_query
+                n_pairs += 1
+        
+        if n_pairs == 0:
+            # Ensure a tensor with gradients is returned to avoid breaking DDP
+            return {"loss_mvc": outputs["pred_embds"].sum() * 0.0}
+            
+        return {"loss_mvc": L_mvc / n_pairs}
+
     def forward(self, outputs, targets, matcher_outputs=None, ret_match_result=False):
         """This performs the loss computation.
         Parameters:
@@ -317,9 +476,13 @@ class VideoSetCriterion(nn.Module):
             losses.update(self.get_loss(loss, outputs, targets, indices, num_masks))
 
         # Contrastive losses between context-aware instance embeddings
-        if 'pred_reid_embed' in outputs:
-            ctx_loss = self.loss_ctxs(outputs['pred_reid_embed'], targets, indices, loss_name='loss_ctx')
+        if 'pred_embds' in outputs:
+            ctx_loss = self.loss_ctxs(outputs['pred_embds'], targets, indices, loss_name='loss_ctx')
             losses.update(ctx_loss)
+            
+            # Multi-view Consistency Loss
+            mvc_loss = self.loss_multiview_consistency(outputs, targets, indices)
+            losses.update(mvc_loss)
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if "aux_outputs" in outputs:
