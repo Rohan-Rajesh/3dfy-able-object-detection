@@ -134,6 +134,16 @@ def ytvis_annotations_to_instances(annos, image_size):
 
     return target
 
+def pose_to_6dof(mat):
+    from scipy.spatial.transform import Rotation
+
+    R = mat[:3, :3].numpy()   # (3, 3) numpy — scipy needs numpy, not torch tensor
+    t = mat[:3, 3].numpy()    # (3,) numpy
+
+    axis_angle = Rotation.from_matrix(R).as_rotvec()  # (3,) axis-angle: direction=axis, magnitude=angle
+
+    return torch.tensor(np.concatenate([axis_angle, t]), dtype=torch.float32)  # (6,)
+
 class YTVISDatasetMapper:
     """
     A callable which takes a dataset dict in YouTube-VIS Dataset format,
@@ -303,6 +313,7 @@ class YTVISDatasetMapper:
 
         video_annos = dataset_dict.pop("annotations", None)
         file_names = dataset_dict.pop("file_names", None)
+        video_poses = dataset_dict.pop("poses", None)
 
         if self.is_train:
             _ids = set()
@@ -317,6 +328,8 @@ class YTVISDatasetMapper:
         dataset_dict["image"] = []
         dataset_dict["instances"] = []
         dataset_dict["file_names"] = []
+        dataset_dict["poses"] = []
+        first_pose_inv = None
         for frame_idx in selected_idx:
             dataset_dict["file_names"].append(file_names[frame_idx])
 
@@ -333,6 +346,16 @@ class YTVISDatasetMapper:
             # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
             # Therefore it's important to use torch.Tensor.
             dataset_dict["image"].append(torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1))))
+
+            # added: adding vipe pose data to dataset_dict
+            # 2 steps for each pose: compute relative pose to first frame, then convert to compact 6DoF format
+            raw_pose = video_poses[frame_idx] if video_poses is not None else None
+            pose_mat = torch.tensor(raw_pose, dtype=torch.float32) if raw_pose is not None else torch.zeros(4, 4, dtype=torch.float32)
+
+            if first_pose_inv is None:
+                first_pose_inv = torch.linalg.inv(pose_mat) if pose_mat.abs().max() > 0 else torch.eye(4, dtype=torch.float32)
+
+            dataset_dict["poses"].append(pose_to_6dof(first_pose_inv @ pose_mat))
 
             if (video_annos is None) or (not self.is_train):
                 continue
@@ -369,6 +392,7 @@ class YTVISDatasetMapper:
                 instances.gt_masks = BitMasks(torch.empty((0, *image_shape)))
             dataset_dict["instances"].append(instances)
 
+        dataset_dict["poses"] = torch.stack(dataset_dict["poses"])  # (T, 6)
         return dataset_dict
 
 class CocoClipDatasetMapper:

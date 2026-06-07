@@ -20,6 +20,22 @@ from detectron2.modeling import Backbone, BACKBONE_REGISTRY
 from .vit import ViT
 from .scale_block import ScaleBlock
 
+# custom model to condition query embeddings with pose embeddings
+class PoseEncoder(nn.Module):
+    def __init__(self, pose_dim=6, hidden_dim=256, output_dim=1024):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(pose_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, output_dim),
+            nn.LayerNorm(output_dim)
+        )
+    
+    def forward(self, pose):
+        return self.mlp(pose)  # [B, D]
 
 class VidEoMT_CLASS(nn.Module):
     def __init__(
@@ -65,7 +81,9 @@ class VidEoMT_CLASS(nn.Module):
             *[ScaleBlock(self.encoder.backbone.embed_dim) for _ in range(num_upscale)],
         )
 
-  
+        self.pose_encoder = PoseEncoder(pose_dim=6, hidden_dim=256, output_dim=self.embed_dim)
+
+
 
     def _predict(self, x: torch.Tensor,H_g,W_g):
         q = x[:, : self.num_q, :]
@@ -122,7 +140,7 @@ class VidEoMT_CLASS(nn.Module):
             x = x + block.drop_path2(block.ls2(block.mlp(block.norm2(x))))
         return x
     
-    def segmenter(self, x, blocks, H_g, W_g, resume: bool = False):
+    def segmenter(self, x, blocks, H_g, W_g, resume: bool = False, poses: torch.Tensor = None):
 
         attn_mask = None
         mask_logits_per_frame, class_logits_per_frame = [], []
@@ -131,6 +149,10 @@ class VidEoMT_CLASS(nn.Module):
         bs = bt // self.num_frames if self.training else 1
         t = bt // bs
         x = einops.rearrange(x, '(b t) n c -> b t n c', t=t)
+
+        if poses is not None:
+            poses = einops.rearrange(poses, '(b t) d -> b t d', t=t)  # (B, T, 6)
+
         attn_mask = None
         x_outputs = []
 
@@ -140,9 +162,14 @@ class VidEoMT_CLASS(nn.Module):
                 self._clear_memory()
                 for j, block in enumerate(blocks):
                     if j == 0:
-                        x_frame = torch.cat(
-                            (self.q.weight[None, :, :], x[:,i,:,:]), dim=1
-                                )
+                        base_q = self.q.weight[None, :, :]  # (1, num_q, D)
+
+                        # added: conditioning queries with pose encoding through element wise addition
+                        if poses is not None:
+                            pose_embed = self.pose_encoder(poses[:, i, :])  # (B, D)
+                            base_q = base_q + pose_embed[:, None, :]  # (B, num_q, D)
+
+                        x_frame = torch.cat((base_q, x[:,i,:,:]), dim=1)
                     if self.training:
                         mask_logits, class_logits = self._predict(x_frame, H_g, W_g)
                         mask_logits_per_layer.append(mask_logits)
@@ -161,9 +188,14 @@ class VidEoMT_CLASS(nn.Module):
             else:
                 for j, block in enumerate(blocks):
                     if j == 0:
-                        x_frame = torch.cat(
-                            (self.last_query_embed, x[:,i,:,:]), dim=1
-                                )
+                        base_q = self.last_query_embed  # (B, num_q, D)
+
+                        # added: conditioning queries with pose encoding through element wise addition
+                        if poses is not None:
+                            pose_embed = self.pose_encoder(poses[:, i, :])  # (B, D)
+                            base_q = base_q + pose_embed[:, None, :]  # (B, num_q, D)
+
+                        x_frame = torch.cat((base_q, x[:,i,:,:]), dim=1)
                     if self.training:
                         mask_logits, class_logits = self._predict(x_frame, H_g, W_g)
                         mask_logits_per_layer.append(mask_logits)
@@ -239,7 +271,7 @@ class VidEoMT_CLASS(nn.Module):
             return [{"pred_masks": b} for b in outputs_seg_masks]
 
   
-    def forward(self, x: torch.Tensor,resume=False):
+    def forward(self, x: torch.Tensor, poses: torch.Tensor = None, resume=False):
         x = self.encoder.backbone.patch_embed(x)
         _,H_g,W_g,_= x.shape
         x = self.encoder.backbone._pos_embed(x)
@@ -248,12 +280,12 @@ class VidEoMT_CLASS(nn.Module):
 
         # backbone blocks for patch tokens
         x = self.backbone_patch_token(x, self.encoder.backbone.blocks[0:self.segmenter_blocks[0]])
-        
+
         # segmenter blocks for genarating quries and feature masks
         start_idx = self.segmenter_blocks[0]
-        end_idx = self.segmenter_blocks[-1] + 1 
+        end_idx = self.segmenter_blocks[-1] + 1
         out = self.segmenter(x, self.encoder.backbone.blocks[start_idx:end_idx], H_g, W_g,
-                           resume=resume)
+                           resume=resume, poses=poses)
         return out
 
 

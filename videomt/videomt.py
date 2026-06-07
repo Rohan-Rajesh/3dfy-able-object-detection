@@ -375,6 +375,8 @@ class videomt(nn.Module):
             gt_instances.append({"labels": gt_classes_per_video, "ids": gt_ids_per_video})
             gt_masks_per_video = gt_masks_per_video[valid_idx].float()          # N, num_frames, H, W
             gt_instances[-1].update({"masks": gt_masks_per_video})
+            if "poses" in targets_per_video:
+                gt_instances[-1]["poses"] = targets_per_video["poses"].to(self.device)  # (T, 6)
 
         return gt_instances
 
@@ -1162,11 +1164,13 @@ class videomt_online(videomt):
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
 
+        # added: 6DoF vipe poses
+        poses = torch.cat([video["poses"] for video in batched_inputs], dim=0).to(self.device)  # (B*T, 6)
+
         if not self.training and self.window_inference:
-            outputs = self.run_window_inference(images.tensor, window_size=self.window_size)
+            outputs = self.run_window_inference(images.tensor, poses, window_size=self.window_size)
         else:
-            
-            outputs = self.backbone(images.tensor, resume=self.keep)
+            outputs = self.backbone(images.tensor, poses, resume=self.keep)
 
         if self.training:
 
@@ -1222,8 +1226,11 @@ class videomt_online(videomt):
                 labels = targets_per_video['labels']
                 ids = targets_per_video['ids'][:, [f]]
                 masks = targets_per_video['masks'][:, [f], :, :]
-                gt_instances.append({"labels": labels, "ids": ids, "masks": masks})
-        return  outputs, gt_instances
+                frame_dict = {"labels": labels, "ids": ids, "masks": masks}
+                if "poses" in targets_per_video:
+                    frame_dict["poses"] = targets_per_video["poses"][f]  # (6,)
+                gt_instances.append(frame_dict)
+        return outputs, gt_instances
    
 
     def post_processing(self, outputs, aux_logits=None):
@@ -1242,7 +1249,7 @@ class videomt_online(videomt):
             return outputs, aux_logits
         return outputs
 
-    def run_window_inference(self, images_tensor, window_size=30):
+    def run_window_inference(self, images_tensor, poses, window_size=30):
         iters = len(images_tensor) // window_size
         if len(images_tensor) % window_size != 0:
             iters += 1
@@ -1252,9 +1259,9 @@ class videomt_online(videomt):
             end_idx = (i+1) * window_size
             # segmeter inference
             if i != 0 or self.keep:
-                out = self.backbone(images_tensor[start_idx:end_idx],resume=True)
+                out = self.backbone(images_tensor[start_idx:end_idx], poses[start_idx:end_idx], resume=True)
             else:
-                out = self.backbone(images_tensor[start_idx:end_idx])
+                out = self.backbone(images_tensor[start_idx:end_idx], poses[start_idx:end_idx])
            
             for j in range(len(out['aux_outputs'])):
                 del out['aux_outputs'][j]['pred_masks'], out['aux_outputs'][j]['pred_logits']

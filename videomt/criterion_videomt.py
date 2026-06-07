@@ -299,52 +299,26 @@ class VideoSetCriterion(nn.Module):
         return loss_map[loss](outputs, targets, indices, num_masks)
 
     # Custom Multi View consistency loss
-    # takes in a frame, loops through all other frames and averages IoU
-    # for all common objects in the 2 frames to find how diverse they are
+    # takes in a frame, loops through all other frames to find the one with biggest pose difference
     def find_most_diverse_frame(self, frame_t_idx, all_targets):
-        masks_t = all_targets[frame_t_idx]["masks"]   # [N_t, H, W]
-        ids_t = all_targets[frame_t_idx]["ids"]        # [N_t]
-        
+        pose_t = all_targets[frame_t_idx].get("poses")  # (6,) or None
+        if pose_t is None:
+            return None
+
         best_frame = None
-        best_diversity = -1
-        
+        best_distance = -1.0
+
         for t_prime_idx, targets_t_prime in enumerate(all_targets):
             if t_prime_idx == frame_t_idx:
                 continue
-            
-            masks_t_prime = targets_t_prime["masks"]   # [N_t', H, W]
-            ids_t_prime = targets_t_prime["ids"]        # [N_t']
-            
-            # Flatten to 1D for set operations
-            ids_t_flat = ids_t.flatten()
-            ids_t_prime_flat = ids_t_prime.flatten()
-            
-            # Find common objects
-            common_ids = set(ids_t_flat.tolist()) & set(ids_t_prime_flat.tolist())
-            if not common_ids:
+            pose_t_prime = targets_t_prime.get("poses")
+            if pose_t_prime is None:
                 continue
-            
-            # Average IoU across common objects
-            ious = []
-            for obj_id in common_ids:
-                idx_t = (ids_t_flat == obj_id).nonzero(as_tuple=True)[0][0]
-                idx_t_prime = (ids_t_prime_flat == obj_id).nonzero(as_tuple=True)[0][0]
-                
-                m_t = masks_t[idx_t].float()
-                m_t_prime = masks_t_prime[idx_t_prime].float()
-                
-                intersection = (m_t * m_t_prime).sum()
-                union = (m_t + m_t_prime - m_t * m_t_prime).sum()
-                iou = intersection / (union + 1e-6)
-                ious.append(iou)
-            
-            # Frame-level diversity = 1 - mean IoU across objects
-            frame_diversity = 1 - (sum(ious) / len(ious))
-            
-            if frame_diversity > best_diversity:
-                best_diversity = frame_diversity
+            distance = (pose_t_prime - pose_t).norm().item()
+            if distance > best_distance:
+                best_distance = distance
                 best_frame = t_prime_idx
-        
+
         return best_frame
 
     def get_aligned_predictions(self, outputs, targets, indices, batch_idx):
@@ -389,7 +363,6 @@ class VideoSetCriterion(nn.Module):
         diverse_pairs = {t: self.find_most_diverse_frame(t, targets) for t in range(len(targets))}
         
         for frame_t, frame_t_prime in diverse_pairs.items():
-            
             if frame_t_prime is None:
                 continue
             
@@ -417,22 +390,34 @@ class VideoSetCriterion(nn.Module):
                     frame_t_prime
                 )
             
+            # Viewpoint similarity weight: exp(-dist), in (0, 1]
+            # Small distance -> weight = 1 (penalize inconsistency fully)
+            # Large distance -> weight = 0 (hard viewpoint, reduce penalty)
+            pose_t = targets[frame_t].get("poses")
+            pose_tp = targets[frame_t_prime].get("poses")
+            if pose_t is not None and pose_tp is not None:
+                viewpoint_dist = (pose_tp - pose_t).norm()
+                similarity_weight = torch.exp(-viewpoint_dist).detach()
+            else:
+                similarity_weight = 1.0
+
             # Match objects across frames using instance IDs
             ids_t = gt_ids_t.flatten().tolist()
             ids_tp = gt_ids_tp.flatten().tolist()
             common_ids = set(ids_t) & set(ids_tp)
-            
+
             if not common_ids:
                 continue
-            
+
             for obj_id in common_ids:
                 idx_t  = ids_t.index(obj_id)
                 idx_tp = ids_tp.index(obj_id)
-                
+
                 reid_t  = pred_reids_t[idx_t]       # [D]
                 reid_tp = pred_reids_tp[idx_tp]      # [D]
 
-                weight = (conf_t[idx_t] * conf_tp[idx_tp]).detach()
+                # Full weight: penalize more on similar viewpoints with confident predictions
+                weight = (conf_t[idx_t] * conf_tp[idx_tp] * similarity_weight).detach()
 
                 # Query consistency loss
                 L_query = weight * F.mse_loss(reid_t, reid_tp)
