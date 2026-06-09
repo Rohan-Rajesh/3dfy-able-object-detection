@@ -355,7 +355,10 @@ class YTVISDatasetMapper:
             if first_pose_inv is None:
                 first_pose_inv = torch.linalg.inv(pose_mat) if pose_mat.abs().max() > 0 else torch.eye(4, dtype=torch.float32)
 
-            dataset_dict["poses"].append(pose_to_6dof(first_pose_inv @ pose_mat))
+            if pose_mat.abs().max() == 0:
+                dataset_dict["poses"].append(torch.zeros(6, dtype=torch.float32))
+            else:
+                dataset_dict["poses"].append(pose_to_6dof(first_pose_inv @ pose_mat))
 
             if (video_annos is None) or (not self.is_train):
                 continue

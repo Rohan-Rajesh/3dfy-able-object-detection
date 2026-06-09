@@ -69,17 +69,37 @@ def load_glb_accepted(glb_root: Path) -> set[tuple[str, int]]:
     return accepted
 
 
-def load_pose_data(poses_root: Path, seq_name: str) -> dict[int, list] | None:
+def has_pose_data(poses_root: Path, seq_name: str) -> bool:
+    return (poses_root / seq_name / "pose" / "images.npz").exists()
+
+
+def load_pose_data(poses_root: Path, seq_name: str, total_frames: int) -> dict[int, list]:
     """Load per-frame pose matrices for a video.
 
-    Returns a {original_frame_idx: 4x4_matrix_as_nested_list} mapping,
-    or None if the npz file does not exist.
+    If the npz inds are sequential (0, 1, ..., N-1) — meaning VIPE used its own
+    input-list indices rather than original frame numbers — the N poses are
+    first mapped evenly across [0, total_frames-1].
+
+    Every original frame is then assigned its nearest keyframe pose so there are
+    no gaps (no None entries in the output).
+
+    Returns {original_frame_idx: 4x4_matrix_as_nested_list} for all frames 0..total_frames-1.
     """
-    npz_path = poses_root / seq_name / "pose" / "images.npz"
-    if not npz_path.exists():
-        return None
-    d = np.load(npz_path)
-    return {int(idx): d["data"][i].tolist() for i, idx in enumerate(d["inds"])}
+    d = np.load(poses_root / seq_name / "pose" / "images.npz")
+    inds = d["inds"]
+    data = d["data"]
+    n = len(inds)
+
+    if list(inds) == list(range(n)):
+        keyframe_positions = [round(i * (total_frames - 1) / max(n - 1, 1)) for i in range(n)]
+    else:
+        keyframe_positions = [int(idx) for idx in inds]
+
+    pose_list = data.tolist()
+    return {
+        f: pose_list[min(range(n), key=lambda k: abs(keyframe_positions[k] - f))]
+        for f in range(total_frames)
+    }
 
 
 def is_object_positive(
@@ -125,8 +145,7 @@ def process_video(
         print(f"  [SKIP] {seq_name}: not in completeness data")
         return None, [], ann_id
 
-    pose_map = load_pose_data(poses_root, seq_name)
-    if pose_map is None:
+    if not has_pose_data(poses_root, seq_name):
         print(f"  [SKIP] {seq_name}: no vipe poses found")
         return None, [], ann_id
 
@@ -141,6 +160,7 @@ def process_video(
         rle_data = json.load(f)
 
     total_frames = obj_data["total_frames"]
+    pose_map = load_pose_data(poses_root, seq_name, total_frames)
     object_names = obj_data["objects"]
     video_completeness = completeness_data.get(seq_name, {})
 
@@ -267,7 +287,7 @@ def build_annotations(root: Path, output_path: Path) -> None:
             videos.append(video_entry)
             annotations.extend(ann_entries)
 
-    out_file = output_path / "annotations.json"
+    out_file = output_path / "all_annotations.json"
     dataset = {"videos": videos, "annotations": annotations, "categories": categories}
     with open(out_file, "w") as f:
         json.dump(dataset, f)

@@ -27,7 +27,7 @@ COCO-format annotations into dicts in "Detectron2 format".
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["load_ytvis_json", "register_ytvis_instances"]
+__all__ = ["load_ytvis_json", "register_ytvis_instances", "_get_custom_instances_meta"]
 
 COCO_TO_YTVIS_2019 = {
     1:1, 2:21, 3:6, 4:21, 5:28, 7:17, 8:29, 9:34, 17:14, 18:8, 19:18, 21:15, 22:32, 23:20, 24:30, 25:22, 35:33, 36:33, 41:5, 42:27, 43:40
@@ -199,6 +199,14 @@ def _get_ovis_instances_meta():
         "thing_colors": thing_colors,
     }
     return ret
+
+
+def _get_custom_instances_meta():
+    return {
+        "thing_dataset_id_to_contiguous_id": {1: 0},
+        "thing_classes": ["reconstructable"],
+        "thing_colors": [[0, 128, 255]],
+    }
 
 
 def load_ytvis_json(json_file, image_root, dataset_name=None, extra_annotation_keys=None):

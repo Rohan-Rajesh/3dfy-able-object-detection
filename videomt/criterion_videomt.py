@@ -390,14 +390,15 @@ class VideoSetCriterion(nn.Module):
                     frame_t_prime
                 )
             
-            # Viewpoint similarity weight: exp(-dist), in (0, 1]
-            # Small distance -> weight = 1 (penalize inconsistency fully)
-            # Large distance -> weight = 0 (hard viewpoint, reduce penalty)
+            # Viewpoint weight: exp(-dist / scale), decays slowly so even large
+            # viewpoint differences still carry meaningful signal.
+            # scale=5.0 keeps weight > 0.13 up to dist≈8, vs exp(-dist) which
+            # drops below 0.05 at dist=3.
             pose_t = targets[frame_t].get("poses")
             pose_tp = targets[frame_t_prime].get("poses")
             if pose_t is not None and pose_tp is not None:
                 viewpoint_dist = (pose_tp - pose_t).norm()
-                similarity_weight = torch.exp(-viewpoint_dist).detach()
+                similarity_weight = torch.exp(-viewpoint_dist / 5.0).detach()
             else:
                 similarity_weight = 1.0
 
@@ -416,7 +417,6 @@ class VideoSetCriterion(nn.Module):
                 reid_t  = pred_reids_t[idx_t]       # [D]
                 reid_tp = pred_reids_tp[idx_tp]      # [D]
 
-                # Full weight: penalize more on similar viewpoints with confident predictions
                 weight = (conf_t[idx_t] * conf_tp[idx_tp] * similarity_weight).detach()
 
                 # Query consistency loss

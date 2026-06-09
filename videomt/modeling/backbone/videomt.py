@@ -33,7 +33,11 @@ class PoseEncoder(nn.Module):
             nn.Linear(hidden_dim, output_dim),
             nn.LayerNorm(output_dim)
         )
-    
+        # Zero-init output projection so pose_embed ≈ 0 at training start,
+        # preserving pre-trained query embeddings until pose conditioning is learned.
+        nn.init.zeros_(self.mlp[-2].weight)
+        nn.init.zeros_(self.mlp[-2].bias)
+
     def forward(self, pose):
         return self.mlp(pose)  # [B, D]
 

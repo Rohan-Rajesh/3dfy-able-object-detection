@@ -272,7 +272,10 @@ class videomt(nn.Module):
                 labels = targets_per_video['labels']
                 ids = targets_per_video['ids'][:, [f]]
                 masks = targets_per_video['masks'][:, [f], :, :]
-                gt_instances.append({"labels": labels, "ids": ids, "masks": masks})
+                frame_dict = {"labels": labels, "ids": ids, "masks": masks}
+                if "poses" in targets_per_video:
+                    frame_dict["poses"] = targets_per_video["poses"][f]  # (6,)
+                gt_instances.append(frame_dict)
         return outputs, gt_instances
 
     def match_from_embds(self, tgt_embds, cur_embds):

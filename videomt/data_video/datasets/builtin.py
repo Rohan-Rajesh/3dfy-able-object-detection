@@ -19,7 +19,6 @@ from .ytvis import (
     _get_ytvis_2021_instances_meta,
     _get_ovis_instances_meta,
     _get_custom_instances_meta,
-    _get_objectron_bottle_instances_meta,
 )
 
 # ============================================================================
@@ -233,7 +232,7 @@ _PREDEFINED_SPLITS_CUSTOM = {
 
 
 def register_all_custom(_root=None):
-    """Register custom AI2Thor indoor dataset."""
+    """Register custom dataset."""
     for key, (image_root, json_file) in _PREDEFINED_SPLITS_CUSTOM.items():
         register_ytvis_instances(
             key,
@@ -241,61 +240,6 @@ def register_all_custom(_root=None):
             json_file,
             image_root,
         )
-
-
-# ============================================================================
-# Objectron Water Bottle Dataset
-# ============================================================================
-_OBJECTRON_DATA_ROOT = "/mmfs1/gscratch/krishna/rohanr12/videomt/intermediate_data"
-
-_PREDEFINED_SPLITS_OBJECTRON_BOTTLE = {
-    "objectron_bottle_train": (
-        f"{_OBJECTRON_DATA_ROOT}/objectron_frames",
-        f"{_OBJECTRON_DATA_ROOT}/objectron_annotations/train.json",
-    ),
-    "objectron_bottle_val": (
-        f"{_OBJECTRON_DATA_ROOT}/objectron_frames",
-        f"{_OBJECTRON_DATA_ROOT}/objectron_annotations/valid.json",
-    ),
-}
-
-
-def register_all_objectron_bottle(_root=None):
-    """Register Objectron water bottle dataset."""
-    for key, (image_root, json_file) in _PREDEFINED_SPLITS_OBJECTRON_BOTTLE.items():
-        register_ytvis_instances(
-            key,
-            _get_objectron_bottle_instances_meta(),
-            json_file,
-            image_root,
-        )
-
-# custom ovis
-
-_OVIS_DATA_ROOT = "/mmfs1/gscratch/krishna/rohanr12/videomt/intermediate_data"
-
-_PREDEFINED_SPLITS_CUSTOM_OVIS = {
-    "ovis_custom_train": (
-        f"{_OVIS_DATA_ROOT}/ovis/ovis_frames",
-        f"{_OVIS_DATA_ROOT}/ovis/annotations/train.json",
-    ),
-    "ovis_custom_val": (
-        f"{_OVIS_DATA_ROOT}/ovis/ovis_frames",
-        f"{_OVIS_DATA_ROOT}/ovis/annotations/valid.json",
-    ),
-}
-
-
-def register_all_custom_ovis(_root=None):
-    """Register Objectron water bottle dataset."""
-    for key, (image_root, json_file) in _PREDEFINED_SPLITS_CUSTOM_OVIS.items():
-        register_ytvis_instances(
-            key,
-            _get_ovis_instances_meta(),
-            json_file,
-            image_root,
-        )
-
 
 if __name__.endswith(".builtin"):
     # Register datasets
@@ -310,5 +254,3 @@ if __name__.endswith(".builtin"):
     from . import vss
     register_all_sot(_root)
     register_all_custom()
-    register_all_objectron_bottle()
-    register_all_custom_ovis()
