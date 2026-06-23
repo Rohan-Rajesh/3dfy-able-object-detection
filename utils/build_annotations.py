@@ -232,7 +232,7 @@ def process_video(
     return video_entry, ann_entries, ann_id
 
 
-def build_annotations(root: Path, output_path: Path) -> None:
+def build_annotations(root: Path, output_path: Path, external_poses: Path | None = None) -> None:
     output_path.mkdir(parents=True, exist_ok=True)
 
     categories = [
@@ -249,13 +249,16 @@ def build_annotations(root: Path, output_path: Path) -> None:
         print(f"[ERROR] No batch_* subdirectories found in {root}")
         return
 
+    if external_poses is not None:
+        print(f"Using external poses from: {external_poses}")
+
     for batch_dir in batch_dirs:
         output_dir = batch_dir / "output"
         frames_root = output_dir / "step1_frames"
         tracking_root = output_dir / "step2_tracking" / "fwd_refined_masks"
         completeness_file = output_dir / "step4.5_completeness" / "json" / "results.json"
         glb_root = output_dir / "final_3d_assets"
-        poses_root = output_dir / "vipe_poses"
+        poses_root = external_poses if external_poses is not None else output_dir / "vipe_poses"
 
         missing = [p for p in (frames_root, tracking_root, completeness_file) if not p.exists()]
         if missing:
@@ -301,9 +304,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build YTVIS-format annotations from batched pipeline output")
     parser.add_argument("root", help="Root folder containing batch_* subdirectories")
     parser.add_argument("output", help="Folder to write all_annotations.json into")
+    parser.add_argument(
+        "--poses", default=None,
+        help="External pose folder with structure <poses>/<video_id>/pose/images.npz. "
+             "If given, overrides per-batch vipe_poses/.",
+    )
     args = parser.parse_args()
 
-    build_annotations(Path(args.root), Path(args.output))
+    external_poses = Path(args.poses) if args.poses else None
+    build_annotations(Path(args.root), Path(args.output), external_poses)
 
 
 if __name__ == "__main__":

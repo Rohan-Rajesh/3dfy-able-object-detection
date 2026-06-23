@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=videomt
 #SBATCH --account=krishna
-#SBATCH --partition=gpu-a40
-#SBATCH --gres=gpu:a40:4
+#SBATCH --partition=gpu-a100
+#SBATCH --gres=gpu:a100:4
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=256G
+#SBATCH --mem=320G
 #SBATCH --time=24:00:00
 #SBATCH --output=output_videomt_custom_ViTL/slurm_%j.out
 #SBATCH --error=output_videomt_custom_ViTL/slurm_%j.err
