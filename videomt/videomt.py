@@ -1167,7 +1167,6 @@ class videomt_online(videomt):
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
 
-        # added: 6DoF vipe poses
         poses = torch.cat([video["poses"] for video in batched_inputs], dim=0).to(self.device)  # (B*T, 6)
 
         if not self.training and self.window_inference:
@@ -1260,7 +1259,7 @@ class videomt_online(videomt):
         for i in range(iters):
             start_idx = i * window_size
             end_idx = (i+1) * window_size
-            # segmeter inference
+            # segmenter inference
             if i != 0 or self.keep:
                 out = self.backbone(images_tensor[start_idx:end_idx], poses[start_idx:end_idx], resume=True)
             else:

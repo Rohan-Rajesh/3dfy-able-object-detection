@@ -20,7 +20,6 @@ from detectron2.modeling import Backbone, BACKBONE_REGISTRY
 from .vit import ViT
 from .scale_block import ScaleBlock
 
-# custom model to condition query embeddings with pose embeddings
 class PoseEncoder(nn.Module):
     def __init__(self, pose_dim=6, hidden_dim=256, output_dim=1024):
         super().__init__()
@@ -30,16 +29,16 @@ class PoseEncoder(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, output_dim),
-            nn.LayerNorm(output_dim)
+            nn.Linear(hidden_dim, output_dim)
         )
-        # Zero-init output projection so pose_embed ≈ 0 at training start,
-        # preserving pre-trained query embeddings until pose conditioning is learned.
-        nn.init.zeros_(self.mlp[-2].weight)
-        nn.init.zeros_(self.mlp[-2].bias)
+        nn.init.zeros_(self.mlp[-1].weight)
+        nn.init.zeros_(self.mlp[-1].bias)
+
+        self.gate = nn.Parameter(torch.tensor(0.0))
 
     def forward(self, pose):
-        return self.mlp(pose)  # [B, D]
+        return self.gate * self.mlp(pose)  # (B, D)
+
 
 class VidEoMT_CLASS(nn.Module):
     def __init__(
@@ -167,19 +166,15 @@ class VidEoMT_CLASS(nn.Module):
                 for j, block in enumerate(blocks):
                     if j == 0:
                         base_q = self.q.weight[None, :, :]  # (1, num_q, D)
-
-                        # added: conditioning queries with pose encoding through element wise addition
                         if poses is not None:
                             pose_embed = self.pose_encoder(poses[:, i, :])  # (B, D)
                             base_q = base_q + pose_embed[:, None, :]  # (B, num_q, D)
-
                         x_frame = torch.cat((base_q, x[:,i,:,:]), dim=1)
                     if self.training:
                         mask_logits, class_logits = self._predict(x_frame, H_g, W_g)
                         mask_logits_per_layer.append(mask_logits)
                         class_logits_per_layer.append(class_logits)
-                
-                        
+
                     x_frame = x_frame + block.drop_path1(
                         block.ls1(self._attn(block.attn, block.norm1(x_frame), attn_mask))
                     )
@@ -187,32 +182,27 @@ class VidEoMT_CLASS(nn.Module):
 
                 x_outputs.append(x_frame)
                 propag_query = self.query_updater(x_frame[:, : self.num_q, :])
-                # Weighted combination
                 self.last_query_embed = propag_query + self.q.weight[None, :, :]
             else:
                 for j, block in enumerate(blocks):
                     if j == 0:
                         base_q = self.last_query_embed  # (B, num_q, D)
-
-                        # added: conditioning queries with pose encoding through element wise addition
                         if poses is not None:
                             pose_embed = self.pose_encoder(poses[:, i, :])  # (B, D)
                             base_q = base_q + pose_embed[:, None, :]  # (B, num_q, D)
-
                         x_frame = torch.cat((base_q, x[:,i,:,:]), dim=1)
                     if self.training:
                         mask_logits, class_logits = self._predict(x_frame, H_g, W_g)
                         mask_logits_per_layer.append(mask_logits)
                         class_logits_per_layer.append(class_logits)
-                    
+
                     x_frame = x_frame + block.drop_path1(
                         block.ls1(self._attn(block.attn, block.norm1(x_frame), attn_mask))
                     )
                     x_frame = x_frame + block.drop_path2(block.ls2(block.mlp(block.norm2(x_frame))))
-                    
+
                 x_outputs.append(x_frame)
                 propag_query = self.query_updater(x_frame[:, : self.num_q, :])
-                # Weighted combination
                 self.last_query_embed = propag_query + self.q.weight[None, :, :]
 
 
@@ -285,11 +275,11 @@ class VidEoMT_CLASS(nn.Module):
         # backbone blocks for patch tokens
         x = self.backbone_patch_token(x, self.encoder.backbone.blocks[0:self.segmenter_blocks[0]])
 
-        # segmenter blocks for genarating quries and feature masks
+        # segmenter blocks for generating queries and feature masks
         start_idx = self.segmenter_blocks[0]
         end_idx = self.segmenter_blocks[-1] + 1
         out = self.segmenter(x, self.encoder.backbone.blocks[start_idx:end_idx], H_g, W_g,
-                           resume=resume, poses=poses)
+                             resume=resume, poses=poses)
         return out
 
 
