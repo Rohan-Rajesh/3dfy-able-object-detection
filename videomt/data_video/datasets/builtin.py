@@ -217,7 +217,7 @@ def register_all_sot(root):
 # Custom AEA/AriaKit dataset
 # Paths are absolute so they are independent of DETECTRON2_DATASETS.
 # ============================================================================
-_CUSTOM_DATA_ROOT = "/mmfs1/gscratch/krishna/rohanr12/videomt/intermediate_data/aea"
+_CUSTOM_DATA_ROOT = "/mmfs1/gscratch/krishna/rohanr12/videomt_data/aea"
 
 _PREDEFINED_SPLITS_CUSTOM = {
     "custom_train": (
