@@ -16,6 +16,7 @@ PYTHON=/gscratch/krishna/rohanr12/miniconda3/envs/videomt/bin/python
 cd /mmfs1/gscratch/krishna/rohanr12/videomt
 
 $PYTHON train_net_video.py \
+      --eval-only \
       --num-gpus 4 \
       --config-file configs/custom/videomt_custom_ViTL.yaml \
-      MODEL.WEIGHTS weights/yt_2022_vit_large.pth
+      MODEL.WEIGHTS output_videomt_custom_ViTL/model_final.pth

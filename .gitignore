@@ -16,3 +16,4 @@ wandb/*
 output_videomt_custom_ViTL*/
 output_viz/
 intermediate_data/
+temp/

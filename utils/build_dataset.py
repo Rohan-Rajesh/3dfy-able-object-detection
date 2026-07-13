@@ -9,6 +9,7 @@ Usage:
         --positive-ratio 0.8 \
         --output /data/dataset_v1 \
         [--ignore-json /data/test.json] \
+        [--filter-json /data/train.json] \
         [--seed 42]
 
 Output folder structure (symlink-based, ready for build_annotations.py):
@@ -45,24 +46,37 @@ class VideoInfo:
     batch_key: str        # e.g. "batch_r0_001" — output dir name
     batch_output_dir: Path  # original batch's output/ dir
     is_positive: bool
+    n_positive_objects: int = 0
+
+
+def load_seq_names(json_path: Path) -> set[str]:
+    with open(json_path) as f:
+        data = json.load(f)
+    videos = data.get("videos", []) if isinstance(data, dict) else []
+    return {Path(v["file_names"][0]).parts[0] for v in videos if v.get("file_names")}
 
 
 def load_ignore_set(ignore_json: Path) -> set[str]:
-    with open(ignore_json) as f:
-        data = json.load(f)
-    videos = data.get("videos", []) if isinstance(data, dict) else []
-    return {Path(v["file_names"][0]).parent.name for v in videos if v.get("file_names")}
+    return load_seq_names(ignore_json)
+
+
+def count_positive_objects_glb(seq_name: str, glb_root: Path) -> int:
+    return sum(1 for _ in glb_root.glob(f"{seq_name}_obj*_accepted.glb"))
+
+
+def count_positive_objects_completeness(seq_name: str, completeness_data: dict) -> int:
+    return sum(
+        1 for obj in completeness_data.get(seq_name, {}).values()
+        if obj.get("is_suitable", "NO").strip().upper() == "YES"
+    )
 
 
 def is_positive_glb(seq_name: str, glb_root: Path) -> bool:
-    return any(True for _ in glb_root.glob(f"{seq_name}_obj*_accepted.glb"))
+    return count_positive_objects_glb(seq_name, glb_root) > 0
 
 
 def is_positive_completeness(seq_name: str, completeness_data: dict) -> bool:
-    return any(
-        obj.get("is_suitable", "NO").strip().upper() == "YES"
-        for obj in completeness_data.get(seq_name, {}).values()
-    )
+    return count_positive_objects_completeness(seq_name, completeness_data) > 0
 
 
 def scan_root(root: Path, root_idx: int) -> list[VideoInfo]:
@@ -86,7 +100,7 @@ def scan_root(root: Path, root_idx: int) -> list[VideoInfo]:
             continue
 
         completeness_data = {}
-        if completeness_file.exists():
+        if completeness_file.exists() and completeness_file.stat().st_size > 0:
             with open(completeness_file) as f:
                 completeness_data = json.load(f)
 
@@ -106,17 +120,18 @@ def scan_root(root: Path, root_idx: int) -> list[VideoInfo]:
             if not pose_file.exists():
                 continue
 
-            positive = (
-                is_positive_glb(seq_name, glb_root)
+            n_pos_obj = (
+                count_positive_objects_glb(seq_name, glb_root)
                 if use_glb
-                else is_positive_completeness(seq_name, completeness_data)
+                else count_positive_objects_completeness(seq_name, completeness_data)
             )
 
             videos.append(VideoInfo(
                 seq_name=seq_name,
                 batch_key=batch_key,
                 batch_output_dir=output_dir,
-                is_positive=positive,
+                is_positive=n_pos_obj > 0,
+                n_positive_objects=n_pos_obj,
             ))
 
     return videos
@@ -161,6 +176,7 @@ def build_dataset(
     roots: list[Path],
     output: Path,
     ignore_json: Path | None,
+    filter_json: Path | None,
     seed: int,
     max_videos: int | None = None,
     positive_ratio: float | None = None,
@@ -172,6 +188,11 @@ def build_dataset(
         ignore_set = load_ignore_set(ignore_json)
         print(f"Ignore list: {len(ignore_set)} sequences from {ignore_json.name}")
 
+    filter_set: set[str] | None = None
+    if filter_json is not None:
+        filter_set = load_seq_names(filter_json)
+        print(f"Filter list: {len(filter_set)} sequences from {filter_json.name}")
+
     print("\nScanning roots...")
     all_videos: list[VideoInfo] = []
     for i, root in enumerate(roots):
@@ -181,6 +202,9 @@ def build_dataset(
         all_videos.extend(found)
 
     all_videos = [v for v in all_videos if v.seq_name not in ignore_set]
+    if filter_set is not None:
+        all_videos = [v for v in all_videos if v.seq_name in filter_set]
+        print(f"After JSON filter: {len(all_videos)} videos")
     positives = [v for v in all_videos if v.is_positive]
     negatives = [v for v in all_videos if not v.is_positive]
     print(f"\nAfter filtering: {len(positives)} positive, {len(negatives)} negative available")
@@ -223,6 +247,11 @@ def build_dataset(
         print(f"  {batch_key}: {len(batch_videos)} videos ({n_pos} pos, {len(batch_videos)-n_pos} neg)")
         create_output_batch(batch_key, batch_videos, output)
 
+    total_pos_videos = sum(1 for v in selected if v.is_positive)
+    total_pos_objects = sum(v.n_positive_objects for v in selected)
+    print(f"\n=== Dataset Summary ===")
+    print(f"Videos  : {len(selected)} total ({total_pos_videos} positive, {len(selected) - total_pos_videos} negative)")
+    print(f"Objects : {total_pos_objects} positive objects across all selected videos")
     print(f"\nDone -> {output}")
     print(f"Next: python3 utils/build_annotations.py {output} <annotations_dir>")
 
@@ -241,6 +270,8 @@ def main() -> None:
                         help="Output dataset folder (structured for build_annotations.py)")
     parser.add_argument("--ignore-json", default=None,
                         help="YTVIS-format JSON with sequences to exclude (e.g. test set)")
+    parser.add_argument("--filter-json", default=None,
+                        help="YTVIS-format JSON — only include videos present in this file")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility (default: 42)")
     args = parser.parse_args()
@@ -252,6 +283,7 @@ def main() -> None:
         roots=[Path(r) for r in args.roots],
         output=Path(args.output),
         ignore_json=Path(args.ignore_json) if args.ignore_json else None,
+        filter_json=Path(args.filter_json) if args.filter_json else None,
         seed=args.seed,
         max_videos=args.max_videos,
         positive_ratio=args.positive_ratio,
@@ -260,4 +292,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

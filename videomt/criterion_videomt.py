@@ -354,46 +354,32 @@ class VideoSetCriterion(nn.Module):
 
         return pred_masks_aligned, pred_reid_aligned, gt_masks_aligned, gt_ids_aligned, conf
 
-    def loss_multiview_consistency(self, outputs, targets, indices):
+    def loss_multiview_consistency(self, outputs, targets, indices, margin=1.0, lambda_neg=0.5):
         L_mvc = 0.0
         n_pairs = 0
         seen_pairs = set()
-        
+
         # Precompute the most diverse frame for each frame
         diverse_pairs = {t: self.find_most_diverse_frame(t, targets) for t in range(len(targets))}
-        
+
         for frame_t, frame_t_prime in diverse_pairs.items():
             if frame_t_prime is None:
                 continue
-            
+
             # Avoid duplicate pairs
-            pair = (min(frame_t, frame_t_prime),
-                    max(frame_t, frame_t_prime))
+            pair = (min(frame_t, frame_t_prime), max(frame_t, frame_t_prime))
             if pair in seen_pairs:
                 continue
             seen_pairs.add(pair)
-            
+
             # Get aligned predictions for both frames
             pred_masks_t, pred_reids_t, gt_masks_t, gt_ids_t, conf_t = \
-                self.get_aligned_predictions(
-                    outputs,
-                    targets,
-                    indices,
-                    frame_t
-                )
+                self.get_aligned_predictions(outputs, targets, indices, frame_t)
 
             pred_masks_tp, pred_reids_tp, gt_masks_tp, gt_ids_tp, conf_tp = \
-                self.get_aligned_predictions(
-                    outputs,
-                    targets,
-                    indices,
-                    frame_t_prime
-                )
-            
-            # Viewpoint weight: exp(-dist / scale), decays slowly so even large
-            # viewpoint differences still carry meaningful signal.
-            # scale=5.0 keeps weight > 0.13 up to dist≈8, vs exp(-dist) which
-            # drops below 0.05 at dist=3.
+                self.get_aligned_predictions(outputs, targets, indices, frame_t_prime)
+
+            # Viewpoint weight: exp(-dist / scale)
             pose_t = targets[frame_t].get("poses")
             pose_tp = targets[frame_t_prime].get("poses")
             if pose_t is not None and pose_tp is not None:
@@ -411,24 +397,36 @@ class VideoSetCriterion(nn.Module):
                 continue
 
             for obj_id in common_ids:
-                idx_t  = ids_t.index(obj_id)
+                idx_t = ids_t.index(obj_id)
                 idx_tp = ids_tp.index(obj_id)
 
-                reid_t  = pred_reids_t[idx_t]       # [D]
-                reid_tp = pred_reids_tp[idx_tp]      # [D]
+                reid_t = pred_reids_t[idx_t]    # [D]
+                reid_tp = pred_reids_tp[idx_tp]  # [D]
 
                 weight = (conf_t[idx_t] * conf_tp[idx_tp] * similarity_weight).detach()
 
-                # Query consistency loss
-                L_query = weight * F.mse_loss(reid_t, reid_tp)
+                # Positive term: pull the SAME object's embedding together across frames
+                L_pos = weight * F.mse_loss(reid_t, reid_tp)
 
-                L_mvc += L_query
+                # Negative term: push this object's embedding in frame t away from
+                # all OTHER objects' embeddings in frame t_prime (prevents collapse)
+                neg_ids_tp = [i for i in ids_tp if i != obj_id]
+                if neg_ids_tp:
+                    neg_embeds = torch.stack(
+                        [pred_reids_tp[ids_tp.index(nid)] for nid in neg_ids_tp]
+                    )  # [N_neg, D]
+                    dists = (reid_t.unsqueeze(0) - neg_embeds).norm(dim=-1)  # [N_neg]
+                    L_neg = F.relu(margin - dists).mean()
+                else:
+                    L_neg = reid_t.sum() * 0.0  # keep graph valid, contributes nothing
+
+                L_mvc += L_pos + lambda_neg * L_neg
                 n_pairs += 1
-        
+
         if n_pairs == 0:
             # Ensure a tensor with gradients is returned to avoid breaking DDP
             return {"loss_mvc": outputs["pred_embds"].sum() * 0.0}
-            
+
         return {"loss_mvc": L_mvc / n_pairs}
 
     def forward(self, outputs, targets, matcher_outputs=None, ret_match_result=False):

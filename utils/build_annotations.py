@@ -29,6 +29,14 @@ Pose data (images.npz):
 
 Subfolders not starting with "batch_" are ignored.
 All batches are merged into a single output JSON.
+
+Usage:
+    python3 utils/build_annotations.py <root> <output_dir>
+    python3 utils/build_annotations.py <root> <output_dir> --poses <pose_dir>
+
+Example:
+    python3 utils/build_annotations.py /data/dataset_v1 /data/annotations
+    python3 utils/build_annotations.py /data/dataset_v1 /data/annotations --poses /data/vipe_results
 """
 
 import json
@@ -272,7 +280,11 @@ def build_annotations(root: Path, output_path: Path, external_poses: Path | None
 
         if glb_root.exists():
             glb_accepted = load_glb_accepted(glb_root)
-            print(f"  Using GLB gate: {len(glb_accepted)} accepted objects found")
+            if glb_accepted:
+                print(f"  Using GLB gate: {len(glb_accepted)} accepted objects found")
+            else:
+                glb_accepted = None
+                print(f"  final_3d_assets/ exists but no *_accepted.glb files found, falling back to results.json")
         else:
             glb_accepted = None
             print(f"  No final_3d_assets/ found, falling back to results.json")

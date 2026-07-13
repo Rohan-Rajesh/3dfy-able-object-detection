@@ -1167,10 +1167,12 @@ class videomt_online(videomt):
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
 
-        poses = torch.cat([video["poses"] for video in batched_inputs], dim=0).to(self.device)  # (B*T, 6)
+        poses = None
+        if self.training and all("poses" in v for v in batched_inputs):
+            poses = torch.cat([video["poses"] for video in batched_inputs], dim=0).to(self.device)  # (B*T, 6)
 
         if not self.training and self.window_inference:
-            outputs = self.run_window_inference(images.tensor, poses, window_size=self.window_size)
+            outputs = self.run_window_inference(images.tensor, window_size=self.window_size)
         else:
             outputs = self.backbone(images.tensor, poses, resume=self.keep)
 
@@ -1251,7 +1253,7 @@ class videomt_online(videomt):
             return outputs, aux_logits
         return outputs
 
-    def run_window_inference(self, images_tensor, poses, window_size=30):
+    def run_window_inference(self, images_tensor, window_size=30):
         iters = len(images_tensor) // window_size
         if len(images_tensor) % window_size != 0:
             iters += 1
@@ -1261,9 +1263,9 @@ class videomt_online(videomt):
             end_idx = (i+1) * window_size
             # segmenter inference
             if i != 0 or self.keep:
-                out = self.backbone(images_tensor[start_idx:end_idx], poses[start_idx:end_idx], resume=True)
+                out = self.backbone(images_tensor[start_idx:end_idx], resume=True)
             else:
-                out = self.backbone(images_tensor[start_idx:end_idx], poses[start_idx:end_idx])
+                out = self.backbone(images_tensor[start_idx:end_idx])
            
             for j in range(len(out['aux_outputs'])):
                 del out['aux_outputs'][j]['pred_masks'], out['aux_outputs'][j]['pred_logits']
