@@ -3,7 +3,7 @@ _BASE_: ../ytvis22/videomt/vit-large/videomt_online_ViTL.yaml
 MODEL:
   BACKBONE:
     NUM_CLASSES: 1
-    MVC_WEIGHT: 1.0
+    MVC_WEIGHT: 0.0
     NO_OBJECT_WEIGHT: 0.1
 
 DATASETS:
@@ -17,7 +17,7 @@ DATASETS:
 SOLVER:
   IMS_PER_BATCH: 4
   BASE_LR: 0.00002
-  MAX_ITER: 40000
+  MAX_ITER: 80000
   WARMUP_STEPS: [2000, 4000]
   LLRD: 0.75
 INPUT:

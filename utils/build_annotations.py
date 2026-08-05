@@ -276,7 +276,11 @@ def build_annotations(root: Path, output_path: Path, external_poses: Path | None
         print(f"\n[{batch_dir.name}]")
 
         with open(completeness_file) as f:
-            completeness_data = json.load(f)
+            raw = f.read().strip()
+        if not raw:
+            print(f"[SKIP] {batch_dir.name}: completeness results.json is empty")
+            continue
+        completeness_data = json.loads(raw)
 
         if glb_root.exists():
             glb_accepted = load_glb_accepted(glb_root)
